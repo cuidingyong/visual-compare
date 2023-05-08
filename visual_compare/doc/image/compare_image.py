@@ -26,7 +26,7 @@ import numpy as np
 import pytesseract
 from pytesseract import Output
 
-from utils.downloader import is_url, download_file_from_url
+from visual_compare.utils.downloader import is_url, download_file_from_url
 from .ocr import EastTextExtractor
 
 logger = logging.getLogger(__name__)

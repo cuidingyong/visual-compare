@@ -27,8 +27,8 @@ import numpy as np
 import pytesseract
 from skimage import metrics
 
-from doc.image.compare_image import CompareImage
-from utils.downloader import is_url
+from visual_compare.doc.image.compare_image import CompareImage
+from visual_compare.utils.downloader import is_url
 
 logger = logging.getLogger(__name__)
 
