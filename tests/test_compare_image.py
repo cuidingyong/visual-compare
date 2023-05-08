@@ -28,6 +28,24 @@ class TestCompareImage:
         mask = mi.mask
         self.cls().compare_images(img1, img2, mask=mask)
 
+    def test_compare_images_show_diff(self):
+        from doc.image.image import MatchImg
+        img1 = '../files/images/123.png'
+        img11 = '../files/images/000.png'
+        img2 = '../files/images/124.png'
+        mi = MatchImg(img1, img11)
+        mask = mi.mask
+        self.cls(show_diff=True).compare_images(img1, img2, mask=mask)
+
+    def test_compare_images_check_text_content(self):
+        from doc.image.image import MatchImg
+        img1 = '../files/images/i1.png'
+        # img11 = '../files/images/000.png'
+        img2 = '../files/images/i2.png'
+        # mi = MatchImg(img1, img11)
+        # mask = mi.mask
+        self.cls().compare_images(img1, img2, check_text_content=False)
+
     def test_compare_pdf(self):
         from doc.image.image import MatchImg
         img1 = '../files/images/sample_1_page.pdf'
@@ -45,3 +63,20 @@ class TestCompareImage:
         # mi = MatchImg(img1, img11)
         # mask = mi.mask()
         self.cls().compare_images(img1, img2)
+
+    def test_compare_images_error_size(self):
+        from doc.image.image import MatchImg
+        img1 = '../files/images/y1.png'
+        # img11 = '../files/images/000.png'
+        img2 = '../files/images/y2.png'
+        # mi = MatchImg(img1, img11)
+        # mask = mi.mask
+        self.cls().compare_images(img1, img2, check_text_content=False)
+
+    def test_compare_images_with_screenshot_dir(self):
+        img1 = '../files/images/123.png'
+        img2 = '../files/images/124.png'
+        screenshot_dir = 'D://Work//PT//compare//screenshots'
+        cls = self.cls(screenshot_dir=screenshot_dir)
+        cls.compare_images(img1, img2)
+        assert cls.is_different is True

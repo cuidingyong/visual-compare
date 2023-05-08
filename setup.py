@@ -9,7 +9,7 @@ with open(path.join(here, "README.md"), encoding="utf-8") as f:
 
 setup(
     name="visual-compare",
-    version="0.1.0",
+    version="0.1.1",
     description="Image and PDF Compare",
     long_description=long_description,
     long_description_content_type="text/markdown",
@@ -32,6 +32,16 @@ setup(
     keywords="visual compare image pdf diff",
     packages=find_packages(exclude=("tests",)),
     install_requires=[
+        "opencv-python-headless~=4.7",
+        "numpy~=1.24.3",
+        "imutils~=0.5.4",
+        "scikit-image~=0.20",
+        "pytesseract~=0.3.10",
+        "parsimonious~=0.10",
+        "PyMuPDF~=1.22",
+        "pyzbar~=0.1.9",
+        "pylibdmtx~=0.1.10",
+        "Wand~=0.6.11"
     ],
     zip_safe=False,
 )

@@ -11,7 +11,7 @@
                     2023/5/6
 -------------------------------------------------
 """
-import json
+import logging
 import math
 import os
 import time
@@ -27,8 +27,10 @@ import numpy as np
 import pytesseract
 from skimage import metrics
 
-from utils.downloader import is_url
 from doc.image.compare_image import CompareImage
+from utils.downloader import is_url
+
+logger = logging.getLogger(__name__)
 
 
 class VisualTest(object):
@@ -50,7 +52,7 @@ class VisualTest(object):
 
     def __init__(self, threshold: float = 0.0000, dpi: int = DPI_DEFAULT, take_screenshots: bool = False,
                  show_diff: bool = False, ocr_engine: str = OCR_ENGINE, movement_detection: str = MOVEMENT_DETECTION,
-                 watermark_file: str = None, screenshot_format: str = 'jpg', **kwargs):
+                 watermark_file: str = None, screenshot_dir: str = None, screenshot_format: str = 'jpg', **kwargs):
         """
         | =Arguments= | =Description= |
         | ``take_screenshots`` | Shall screenshots be taken also for passed comparisons.   |
@@ -67,7 +69,6 @@ class VisualTest(object):
         """
 
         self.threshold = threshold
-        self.SCREENSHOT_DIRECTORY = Path("screenshots/")
         self.DPI = int(dpi)
         self.DPI_on_lib_init = int(dpi)
         self.take_screenshots = bool(take_screenshots)
@@ -76,29 +77,18 @@ class VisualTest(object):
         self.movement_detection = movement_detection
         self.watermark_file = watermark_file
         self.screenshot_format = screenshot_format
+        try:
+            self.screenshot_dir = Path(screenshot_dir)
+        except TypeError:
+            self.screenshot_dir = Path.cwd() / Path("screenshots/")
         if not (self.screenshot_format == 'jpg' or self.screenshot_format == 'png'):
             self.screenshot_format = 'jpg'
 
-        # built_in = BuiltIn()
-        # try:
-        #     self.OUTPUT_DIRECTORY = built_in.get_variable_value(
-        #         '${OUTPUT DIR}')
-        #     self.reference_run = built_in.get_variable_value(
-        #         '${REFERENCE_RUN}', False)
-        #     self.PABOTQUEUEINDEX = built_in.get_variable_value(
-        #         '${PABOTQUEUEINDEX}')
-        #     # Disabled folder creation for now, as it caused problems in library import
-        #     # os.makedirs(self.OUTPUT_DIRECTORY/self.SCREENSHOT_DIRECTORY, exist_ok=True)
-        # except:
-        #     print("Robot Framework is not running")
-        #     self.OUTPUT_DIRECTORY = Path.cwd()
-        #     # Disabled folder creation for now, as it caused problems in library import
-        #     # os.makedirs(self.OUTPUT_DIRECTORY / self.SCREENSHOT_DIRECTORY, exist_ok=True)
-        #     self.reference_run = False
-        #     self.PABOTQUEUEINDEX = None
-        self.reference_run = False
-        self.OUTPUT_DIRECTORY = Path.cwd()
-        self.PABOTQUEUEINDEX = None
+        self._is_different = False
+
+    @property
+    def is_different(self):
+        return self._is_different
 
     def compare_images(self, reference_image: str, test_image: str, placeholder_file: str = None,
                        mask: Union[str, dict, list] = None, check_text_content: bool = False,
@@ -139,6 +129,7 @@ class VisualTest(object):
         reference_collection = []
         compare_collection = []
         detected_differences = []
+        screenshot_names = []
 
         if dpi is None:
             self.DPI = self.DPI_on_lib_init
@@ -194,7 +185,7 @@ class VisualTest(object):
             compare_collection = candidate_compare_image.opencv_images
 
         if len(reference_collection) != len(compare_collection):
-            print("Pages in reference file:{}. Pages in candidate file:{}".format(
+            logger.warning("Pages in reference file:{}. Pages in candidate file:{}".format(
                 len(reference_collection), len(compare_collection)))
             for i in range(len(reference_collection)):
                 cv2.putText(reference_collection[i], self.REFERENCE_LABEL, self.BOTTOM_LEFT_CORNER_OF_TEXT,
@@ -214,16 +205,17 @@ class VisualTest(object):
             for i, (reference, candidate) in enumerate(zip(reference_collection, compare_collection)):
                 if get_pdf_content:
                     try:
-                        reference_pdf_content = reference_compare_image.mupdfdoc[i]
-                        candidate_pdf_content = candidate_compare_image.mupdfdoc[i]
+                        reference_pdf_content = reference_compare_image.mu_pdf_doc[i]
+                        candidate_pdf_content = candidate_compare_image.mu_pdf_doc[i]
                     except:
-                        reference_pdf_content = reference_compare_image.mupdfdoc[0]
-                        candidate_pdf_content = candidate_compare_image.mupdfdoc[0]
+                        reference_pdf_content = reference_compare_image.mu_pdf_doc[0]
+                        candidate_pdf_content = candidate_compare_image.mu_pdf_doc[0]
                 else:
                     reference_pdf_content = None
                     candidate_pdf_content = None
                 check_difference_results.append(parallel_executor.submit(
-                    self.check_for_differences, reference, candidate, i, detected_differences, compare_options,
+                    self.check_for_differences, reference, candidate, i, detected_differences, screenshot_names,
+                    compare_options,
                     reference_pdf_content, candidate_pdf_content))
         for result in check_difference_results:
             if result.exception() is not None:
@@ -231,43 +223,44 @@ class VisualTest(object):
         if reference_compare_image.barcodes:
             if reference_compare_image.barcodes != candidate_compare_image.barcodes:
                 detected_differences.append(True)
-                print("The barcode content in images is different")
-                print("Reference image:\n", reference_compare_image.barcodes)
-                print("Candidate image:\n", candidate_compare_image.barcodes)
+                logger.error(
+                    f'The barcode content in images is different\nReference image:\n{reference_compare_image.barcodes}\nCandidate image:\n{candidate_compare_image.barcodes}')
 
-        # for difference in detected_differences:
-        #
-        #     if difference:
-        #         print("The compared images are different")
-        #         reference_compare_image.mupdfdoc = None
-        #         candidate_compare_image.mupdfdoc = None
-        #         raise AssertionError('The compared images are different.')
+        for difference in detected_differences:
+            if difference:
+                logger.error("The compared images are different")
+                reference_compare_image.mu_pdf_doc = None
+                candidate_compare_image.mu_pdf_doc = None
+                self._is_different = True
 
-        print("The compared images are equal")
+        logger.info("The compared images are equal")
 
         toc = time.perf_counter()
-        print(f"Visual Image comparison performed in {toc - tic:0.4f} seconds")
+        logger.debug(f"Visual Image comparison performed in {toc - tic:0.4f} seconds")
 
-    def get_images_with_highlighted_differences(self, thresh, reference, candidate, extension=10):
+        return screenshot_names
 
-        # thresh = cv2.dilate(thresh, None, iterations=extension)
+    @staticmethod
+    def get_images_with_highlighted_differences(thresh, reference, candidate, extension=10):
+
         thresh = cv2.dilate(thresh, None, iterations=extension)
         thresh = cv2.erode(thresh, None, iterations=extension)
-        cnts = cv2.findContours(thresh.copy(), cv2.RETR_EXTERNAL,
-                                cv2.CHAIN_APPROX_SIMPLE)
-        cnts = imutils.grab_contours(cnts)
+        contours = cv2.findContours(thresh.copy(), cv2.RETR_EXTERNAL,
+                                    cv2.CHAIN_APPROX_SIMPLE)
+        contours = imutils.grab_contours(contours)
 
         # loop over the contours
-        for c in cnts:
+        for c in contours:
             # compute the bounding box of the contour and then draw the
             # bounding box on both input images to represent where the two
             # images differ
             (x, y, w, h) = cv2.boundingRect(c)
             cv2.rectangle(reference, (x, y), (x + w, y + h), (0, 0, 255), 4)
             cv2.rectangle(candidate, (x, y), (x + w, y + h), (0, 0, 255), 4)
-        return reference, candidate, cnts
+        return reference, candidate, contours
 
-    def get_diff_rectangle(self, thresh):
+    @staticmethod
+    def get_diff_rectangle(thresh):
         points = cv2.findNonZero(thresh)
         (x, y, w, h) = cv2.boundingRect(points)
         return x, y, w, h
@@ -275,27 +268,20 @@ class VisualTest(object):
     def add_screenshot_to_log(self, image, suffix):
         screenshot_name = str(str(uuid.uuid1()) + suffix +
                               '.{}'.format(self.screenshot_format))
-        if self.PABOTQUEUEINDEX is not None:
-            rel_screenshot_path = str(
-                self.SCREENSHOT_DIRECTORY / '{}-{}'.format(self.PABOTQUEUEINDEX, screenshot_name))
-        else:
-            rel_screenshot_path = str(
-                self.SCREENSHOT_DIRECTORY / screenshot_name)
-        abs_screenshot_path = str(
-            self.OUTPUT_DIRECTORY / self.SCREENSHOT_DIRECTORY / screenshot_name)
+        abs_screenshot_path = str(self.screenshot_dir / screenshot_name)
         os.makedirs(os.path.dirname(abs_screenshot_path), exist_ok=True)
         if self.screenshot_format == 'jpg':
             cv2.imwrite(abs_screenshot_path, image, [
                 int(cv2.IMWRITE_JPEG_QUALITY), 70])
         else:
             cv2.imwrite(abs_screenshot_path, image)
-        print("*HTML* " + "<a href='" + rel_screenshot_path + "' target='_blank'><img src='" +
-              rel_screenshot_path + "' style='width:50%; height: auto;'/></a>")
+
+        return screenshot_name
 
     def find_partial_image_position(self, img, template, threshold=0.1, detection="classic"):
 
         if detection == "template":
-            result = self.find_partial_image_distance_with_matchtemplate(img, template, threshold)
+            result = self.find_partial_image_distance_with_match_template(img, template, threshold)
 
         elif detection == "classic":
             result = self.find_partial_image_distance_with_classic_method(img, template, threshold)
@@ -305,13 +291,14 @@ class VisualTest(object):
 
         return result
 
-    def find_partial_image_distance_with_classic_method(self, img, template, threshold=0.1):
-        print("Find partial image position")
+    @staticmethod
+    def find_partial_image_distance_with_classic_method(img, template, threshold=0.1):
+        logger.info("Find partial image position")
         rectangles = []
         img_gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
         template_gray = cv2.cvtColor(template, cv2.COLOR_BGR2GRAY)
         h, w = template.shape[0:2]
-        print("Old detection")
+        logger.info("Old detection")
         template_blur = cv2.GaussianBlur(template_gray, (3, 3), 0)
         template_thresh = cv2.threshold(
             template_blur, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)[1]
@@ -332,20 +319,21 @@ class VisualTest(object):
             return {"pt1": min_loc, "pt2": min_loc_temp}
         return
 
-    def find_partial_image_distance_with_matchtemplate(self, img, template, threshold=0.1):
-        print("Find partial image position")
+    @staticmethod
+    def find_partial_image_distance_with_match_template(img, template, threshold=0.1):
+        logger.info("Find partial image position")
         img_gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
         template_gray = cv2.cvtColor(template, cv2.COLOR_BGR2GRAY)
         h, w = template.shape[0:2]
-        print("dev detection")
+        logger.info("dev detection")
         mask = cv2.absdiff(img_gray, template_gray)
         mask[mask > 0] = 255
 
         # find contours in the mask and get the largest one
-        cnts, hierarchy = cv2.findContours(mask.copy(), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        contours, hierarchy = cv2.findContours(mask.copy(), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 
         # get largest contour
-        largest_contour = max(cnts, key=cv2.contourArea)
+        largest_contour = max(contours, key=cv2.contourArea)
         contour_mask = np.zeros(mask.shape, np.uint8)
         cv2.drawContours(contour_mask, [largest_contour], -1, 255, -1)
 
@@ -368,38 +356,38 @@ class VisualTest(object):
             return {"pt1": min_loc, "pt2": min_loc_temp}
         return
 
-    def get_orb_keypoints_and_descriptors(self, img1, img2, edgeThreshold=5, patchSize=10):
-        orb = cv2.ORB_create(nfeatures=250, edgeThreshold=edgeThreshold, patchSize=patchSize)
+    def get_orb_key_points_and_descriptors(self, img1, img2, edge_threshold=5, patch_size=10):
+        orb = cv2.ORB_create(nfeatures=250, edgeThreshold=edge_threshold, patchSize=patch_size)
         img1_kp, img1_des = orb.detectAndCompute(img1, None)
         img2_kp, img2_des = orb.detectAndCompute(img2, None)
 
         if len(img1_kp) == 0 or len(img2_kp) == 0:
-            if patchSize > 4:
-                patchSize -= 4
-                edgeThreshold = int(patchSize / 2)
-                return self.get_orb_keypoints_and_descriptors(img1, img2, edgeThreshold, patchSize)
+            if patch_size > 4:
+                patch_size -= 4
+                edge_threshold = int(patch_size / 2)
+                return self.get_orb_key_points_and_descriptors(img1, img2, edge_threshold, patch_size)
             else:
                 return None, None, None, None
 
         return img1_kp, img1_des, img2_kp, img2_des
 
     def find_partial_image_distance_with_orb(self, img, template):
-        print("Find partial image position")
+        logger.info("Find partial image position")
         img_gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
         template_gray = cv2.cvtColor(template, cv2.COLOR_BGR2GRAY)
         h, w = template.shape[0:2]
-        print("dev detection")
+        logger.info("dev detection")
         mask = cv2.absdiff(img_gray, template_gray)
         mask[mask > 0] = 255
 
         # find contours in the mask and get the largest one
-        cnts, hierarchy = cv2.findContours(mask.copy(), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        contours, hierarchy = cv2.findContours(mask.copy(), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 
         # get largest contour
-        largest_contour = max(cnts, key=cv2.contourArea)
+        largest_contour = max(contours, key=cv2.contourArea)
         contour_mask = np.zeros(mask.shape, np.uint8)
 
-        for cnt in cnts:
+        for cnt in contours:
             cv2.drawContours(contour_mask, [cnt], -1, 255, -1)
 
         masked_img = cv2.bitwise_not(cv2.bitwise_and(contour_mask, cv2.bitwise_not(img_gray)))
@@ -409,10 +397,10 @@ class VisualTest(object):
         edges_template = cv2.Canny(masked_template, 100, 200)
 
         # Find the keypoints and descriptors for the template image
-        template_keypoints, template_descriptors, target_keypoints, target_descriptors = self.get_orb_keypoints_and_descriptors(
+        template_key_points, template_descriptors, target_keypoints, target_descriptors = self.get_orb_key_points_and_descriptors(
             edges_template, edges_img)
 
-        if len(template_keypoints) == 0 or len(target_keypoints) == 0:
+        if len(template_key_points) == 0 or len(target_keypoints) == 0:
             return
 
         # Create a brute-force matcher
@@ -426,23 +414,26 @@ class VisualTest(object):
             matches = sorted(matches, key=lambda x: x.distance)
             best_matches = matches[:10]
             # Estimate the transformation matrix between the two images
-            src_pts = np.float32([template_keypoints[m.queryIdx].pt for m in best_matches]).reshape(-1, 1, 2)
+            src_pts = np.float32([template_key_points[m.queryIdx].pt for m in best_matches]).reshape(-1, 1, 2)
             dst_pts = np.float32([target_keypoints[m.trainIdx].pt for m in best_matches]).reshape(-1, 1, 2)
 
-            M, mask = cv2.findHomography(src_pts, dst_pts, cv2.RANSAC, 5.0)
+            m, mask = cv2.findHomography(src_pts, dst_pts, cv2.RANSAC, 5.0)
 
             # Calculate the amount of movement between the two images
-            movement = np.sqrt(np.sum(M[:, 2] ** 2))
+            movement = np.sqrt(np.sum(m[:, 2] ** 2))
 
             self.add_screenshot_to_log(
-                cv2.drawMatches(masked_template, template_keypoints, masked_img, target_keypoints, best_matches, None,
+                cv2.drawMatches(masked_template, template_key_points, masked_img, target_keypoints, best_matches, None,
                                 flags=cv2.DRAW_MATCHES_FLAGS_NOT_DRAW_SINGLE_POINTS), "ORB_matches")
             return {"distance": movement}
 
             # Draw the matches on the target image
             # result = cv2.drawMatches(masked_template, template_keypoints, masked_img, target_keypoints, matches[:10], None, flags=cv2.DRAW_MATCHES_FLAGS_NOT_DRAW_SINGLE_POINTS)
 
-    def overlay_two_images(self, image, overlay, ignore_color=[255, 255, 255]):
+    @staticmethod
+    def overlay_two_images(image, overlay, ignore_color=None):
+        if ignore_color is None:
+            ignore_color = [255, 255, 255]
         ignore_color = np.asarray(ignore_color)
         mask = ~(overlay == ignore_color).all(-1)
         # Or mask = (overlay!=ignore_color).any(-1)
@@ -450,7 +441,7 @@ class VisualTest(object):
         out[mask] = image[mask] * 0.5 + overlay[mask] * 0.5
         return out
 
-    def check_for_differences(self, reference, candidate, i, detected_differences, compare_options,
+    def check_for_differences(self, reference, candidate, i, detected_differences, screenshot_names, compare_options,
                               reference_pdf_content=None, candidate_pdf_content=None):
 
         if reference.shape[0] != candidate.shape[0] or reference.shape[1] != candidate.shape[1]:
@@ -458,10 +449,6 @@ class VisualTest(object):
                 candidate = cv2.resize(
                     candidate, (reference.shape[1], reference.shape[0]))
             else:
-                self.add_screenshot_to_log(
-                    reference, "_reference_page_" + str(i + 1))
-                self.add_screenshot_to_log(
-                    candidate, "_candidate_page_" + str(i + 1))
                 raise AssertionError(
                     f'The compared images have different dimensions:\nreference:{reference.shape}\ncandidate:{candidate.shape}')
 
@@ -503,23 +490,18 @@ class VisualTest(object):
 
             thresh = cv2.threshold(diff, 0, 255,
                                    cv2.THRESH_BINARY_INV | cv2.THRESH_OTSU)[1]
-            # absolute_diff = cv2.absdiff(gray_a, gray_b)
-            reference_with_rect, candidate_with_rect, cnts = self.get_images_with_highlighted_differences(
+
+            reference_with_rect, candidate_with_rect, contours = self.get_images_with_highlighted_differences(
                 thresh, reference.copy(), candidate.copy(), extension=int(os.getenv('EXTENSION', 2)))
-            blended_images = self.overlay_two_images(
-                reference_with_rect, candidate_with_rect)
 
             cv2.putText(reference_with_rect, self.REFERENCE_LABEL, self.BOTTOM_LEFT_CORNER_OF_TEXT,
                         self.FONT, self.FONT_SCALE, self.FONT_COLOR, self.LINE_TYPE)
             cv2.putText(candidate_with_rect, self.CANDIDATE_LABEL, self.BOTTOM_LEFT_CORNER_OF_TEXT,
                         self.FONT, self.FONT_SCALE, self.FONT_COLOR, self.LINE_TYPE)
 
-            self.add_screenshot_to_log(np.concatenate(
+            screenshot_name = self.add_screenshot_to_log(np.concatenate(
                 (reference_with_rect, candidate_with_rect), axis=1), "_page_" + str(i + 1) + "_rectangles_concat")
-            # self.add_screenshot_to_log(
-            #     blended_images, "_page_" + str(i + 1) + "_blended")
-            self.add_screenshot_to_log(reference_with_rect, "_page_" + str(i + 1) + "_reference")
-            self.add_screenshot_to_log(candidate_with_rect, "_page_" + str(i + 1) + "_candidate")
+            screenshot_names.append(screenshot_name)
 
             if self.show_diff:
                 self.add_screenshot_to_log(np.concatenate(
@@ -527,16 +509,17 @@ class VisualTest(object):
 
             images_are_equal = False
 
-            if (compare_options["ignore_watermarks"] is True and len(cnts) == 1) or compare_options["watermark_file"] is not None:
-                if compare_options["ignore_watermarks"] is True and len(cnts) == 1:
-                    (x, y, w, h) = cv2.boundingRect(cnts[0])
+            if (compare_options["ignore_watermarks"] is True and len(contours) == 1) or compare_options[
+                "watermark_file"] is not None:
+                if compare_options["ignore_watermarks"] is True and len(contours) == 1:
+                    (x, y, w, h) = cv2.boundingRect(contours[0])
                     diff_center_x = abs((x + w / 2) - (reference.shape[1] / 2))
                     diff_center_y = abs((y + h / 2) - (reference.shape[0] / 2))
                     if (diff_center_x < reference.shape[1] * self.WATERMARK_CENTER_OFFSET) and (
                             w * 25.4 / self.DPI < self.WATERMARK_WIDTH) and (
                             h * 25.4 / self.DPI < self.WATERMARK_HEIGHT):
                         images_are_equal = True
-                        print(
+                        logger.info(
                             "A watermark position was identified. After ignoring watermark area, both images are equal")
                         return
                 if compare_options["watermark_file"] is not None:
@@ -554,7 +537,7 @@ class VisualTest(object):
                                     watermark = CompareImage(
                                         single_watermark, DPI=self.DPI).opencv_images[0]
                                 except:
-                                    print(
+                                    logger.error(
                                         f'Watermark file {single_watermark} could not be loaded. Continue with next item.')
                                     continue
                                 # Check if alpha channel is present and remove it
@@ -576,7 +559,7 @@ class VisualTest(object):
                                 if cv2.countNonZero(cv2.subtract(absolute_diff, mask_inv)) == 0 or cv2.countNonZero(
                                         cv2.subtract(thresh, mask_inv)) == 0:
                                     images_are_equal = True
-                                    print(
+                                    logger.info(
                                         "A watermark file was provided. After removing watermark area, both images are equal")
                                     return
                         except:
@@ -590,8 +573,8 @@ class VisualTest(object):
                 if compare_options["get_pdf_content"] is not True:
                     # x, y, w, h = self.get_diff_rectangle(thresh)
                     images_are_equal = True
-                    for c in range(len(cnts)):
-                        (x, y, w, h) = cv2.boundingRect(cnts[c])
+                    for c in range(len(contours)):
+                        (x, y, w, h) = cv2.boundingRect(contours[c])
                         diff_area_reference = reference[y:y + h, x:x + w]
                         diff_area_candidate = candidate[y:y + h, x:x + w]
 
@@ -605,22 +588,21 @@ class VisualTest(object):
                         text_candidate = pytesseract.image_to_string(
                             diff_area_candidate, config='--psm 6').replace("\n\n", "\n")
                         if text_reference.strip() == text_candidate.strip():
-                            print("Partial text content is the same")
-                            print(text_reference)
+                            logger.info("Partial text content is the same")
+                            logger.info(text_reference)
                         else:
                             images_are_equal = False
                             detected_differences.append(True)
-                            print("Partial text content is different")
-                            print(text_reference +
-                                  " is not equal to " + text_candidate)
+                            logger.warning("Partial text content is different")
+                            logger.warning(text_reference + " is not equal to " + text_candidate)
                 elif compare_options["get_pdf_content"] is True:
 
                     images_are_equal = True
                     ref_words = reference_pdf_content.get_text("words")
                     cand_words = candidate_pdf_content.get_text("words")
-                    for c in range(len(cnts)):
+                    for c in range(len(contours)):
 
-                        (x, y, w, h) = cv2.boundingRect(cnts[c])
+                        (x, y, w, h) = cv2.boundingRect(contours[c])
                         rect = fitz.Rect(
                             x * 72 / self.DPI, y * 72 / self.DPI, (x + w) * 72 / self.DPI, (y + h) * 72 / self.DPI)
                         diff_area_ref_words = [
@@ -640,19 +622,19 @@ class VisualTest(object):
                         if len(diff_area_ref_words) != len(diff_area_cand_words):
                             images_are_equal = False
                             detected_differences.append(True)
-                            print("The identified pdf layout elements are different",
-                                  diff_area_ref_words, diff_area_cand_words)
+                            logger.info("The identified pdf layout elements are different",
+                                        diff_area_ref_words, diff_area_cand_words)
                         else:
 
                             if diff_area_ref_words.strip() != diff_area_cand_words.strip():
                                 images_are_equal = False
                                 detected_differences.append(True)
-                                print("Partial text content is different")
-                                print(diff_area_ref_words.strip(
-                                ), " is not equal to ", diff_area_cand_words.strip())
+                                logger.warning("Partial text content is different")
+                                logger.warning(diff_area_ref_words.strip(), " is not equal to ",
+                                               diff_area_cand_words.strip())
                         if images_are_equal:
-                            print("Partial text content of area is the same")
-                            print(diff_area_ref_words)
+                            logger.info("Partial text content of area is the same")
+                            logger.info(diff_area_ref_words)
 
             if compare_options["move_tolerance"] is not None and images_are_equal is not True:
                 move_tolerance = int(compare_options["move_tolerance"])
@@ -661,9 +643,9 @@ class VisualTest(object):
                 if compare_options["get_pdf_content"] is not True:
                     # Experimental, to solve a problem with small images
                     # wr, hr, _ = reference.shape
-                    for c in range(len(cnts)):
+                    for c in range(len(contours)):
 
-                        (x, y, w, h) = cv2.boundingRect(cnts[c])
+                        (x, y, w, h) = cv2.boundingRect(contours[c])
                         diff_area_reference = reference[y:y + h, x:x + w]
                         diff_area_candidate = candidate[y:y + h, x:x + w]
 
@@ -685,7 +667,7 @@ class VisualTest(object):
                             positions_in_compare_image = self.find_partial_image_position(
                                 search_area_candidate, diff_area_reference, detection=self.movement_detection)
                         except:
-                            print("Error in finding position in compare image")
+                            logger.error("Error in finding position in compare image")
                             images_are_equal = False
                             detected_differences.append(True)
                             continue
@@ -694,7 +676,7 @@ class VisualTest(object):
                             images_are_equal = False
                             detected_differences.append(True)
 
-                            print("Image section contains only white background")
+                            logger.warning("Image section contains only white background")
 
                             self.add_screenshot_to_log(np.concatenate((cv2.copyMakeBorder(diff_area_reference, top=2,
                                                                                           bottom=2, left=2, right=2,
@@ -780,9 +762,9 @@ class VisualTest(object):
                     images_are_equal = True
                     ref_words = reference_pdf_content.get_text("words")
                     cand_words = candidate_pdf_content.get_text("words")
-                    for c in range(len(cnts)):
+                    for c in range(len(contours)):
 
-                        (x, y, w, h) = cv2.boundingRect(cnts[c])
+                        (x, y, w, h) = cv2.boundingRect(contours[c])
                         rect = fitz.Rect(
                             x * 72 / self.DPI, y * 72 / self.DPI, (x + w) * 72 / self.DPI, (y + h) * 72 / self.DPI)
                         diff_area_ref_words = [
@@ -842,103 +824,14 @@ class VisualTest(object):
             if images_are_equal is not True:
                 detected_differences.append(True)
 
-    def get_text_from_document(self, image: str, ocr_engine: str = "tesseract"):
-        """Gets Text Content from documents/images ``image``.
-
-        Text content is returned as a list of strings. None if no text is identified.
-
-        | =Arguments= | =Description= |
-        | ``image`` | Path of the Image/Document from which the text content shall be retrieved |
-        | ``ocr_engine`` | OCR Engine to be used. Options are ``tesseract`` and ``east``.  Default is ``tesseract``. |
-
-        Examples:
-        | ${text} | `Get Text From Document` | reference.pdf | #Gets Text Content from .pdf |
-        | ${text} | `Get Text From Document` | reference.jpg | #Gets Text Content from .jpg |
-        | List Should Contain Value | ${text} | Test String | #Checks if list contains a specific string |
-
-        """
-
-        img = CompareImage(image)
-        if img.extension == '.pdf':
-            text = []
-            for i in range(len(img.opencv_images)):
-                tdict = json.loads(img.mupdfdoc[i].get_text("json"))
-                for block in tdict['blocks']:
-                    if block['type'] == 0:
-                        for line in block['lines']:
-                            if line['spans'][0]['text']:
-                                text.append(line['spans'][0]['text'])
-        else:
-            if ocr_engine == "tesseract":
-                try:
-                    img.get_ocr_text_data()
-                    # if confidence is higher than 20, add to text list
-                    text = [x for x in img.text_content[0]['text'] if x]
-                except:
-                    text = None
-            elif ocr_engine == "east":
-                try:
-                    img.get_text_content_with_east()
-                    text = [x for x in img.text_content[0]['text'] if x]
-                except:
-                    text = None
-        return text
-
-    def get_barcodes_from_document(self, image: str, return_type: str = "value"):
-        """Gets Barcodes from documents/images ``image``.
-
-        Barcode Values are returned as a list of strings as a default. None if no barcode is identified.
-        If ``return_type`` is set to ``coordinates``, the coordinates of the barcode are returned.
-        If ``return_type`` is set to ``all``, the coordinates and the value of the barcode are returned as two separate lists.
-
-        | =Arguments= | =Description= |
-        | ``image`` | Path of the Image/Document from which the barcode content shall be retrieved |
-        | ``return_type`` | Type of return value. Options are ``value``, ``coordinates`` and ``all``.  Default is ``value``. |
-
-
-        Examples:
-        | ${values} | `Get Barcodes From Document` | reference.pdf | #Gets Barcode Values from .pdf as list |
-        | ${values} | `Get Barcodes From Document` | reference.jpg | #Gets Barcode Values from .jpg as list |
-        | List Should Contain Value | ${values} | 123456789 | #Checks if list contains a specific barcode |
-        | ${coordinates} | `Get Barcodes From Document` | reference.jpg | return_type=coordinates | #Gets Barcode Coordinates as dict`{'x':10, 'y':20, 'width':100, 'height':30}`|
-        | ${barcodes} | `Get Barcodes From Document` | reference.jpg | return_type=all | #Gets Barcode Values and Coordinates as list `[values, coordinates]` |
-
-        """
-
-        img = CompareImage(image)
-        img.identify_barcodes()
-        if img.barcodes is None:
-            barcodes = None
-        else:
-            # Get values key from barcode dictionary
-            values = [x['value'] for x in img.barcodes]
-            # Get coordinates key from barcode dictionary
-            # Coordinates are stored as 4 key-value pairs, x, y, height and width
-            coordinates = [{'x': x['x'], 'y': x['y'], 'width': x['width'], 'height': x['height']} for x in img.barcodes]
-            if return_type == "value":
-                barcodes = values
-            elif return_type == "coordinates":
-                barcodes = coordinates
-            elif return_type == "all":
-                barcodes = [values, coordinates]
-        return barcodes
-
-
-def remove_empty_textelements(lst):
-    new_list = []
-    for i, dic in enumerate(lst):
-        if str(dic['text']).isspace() is not True:
-            new_list.append(dic)
-    return new_list
-
 
 def make_text(words):
-    """Return textstring output of get_text("words").
+    """Return text string output of get_text("words").
     Word items are sorted for reading sequence left to right,
     top to bottom.
     """
     line_dict = {}  # key: vertical coordinate, value: list of words
-    words.sort(key=lambda w: w[0])  # sort by horizontal coordinate
+    words.sort(key=lambda wo: wo[0])  # sort by horizontal coordinate
     for w in words:  # fill the line dictionary
         y1 = round(w[3], 1)  # bottom of a word: don't be too picky!
         word = w[4]  # the text of the word

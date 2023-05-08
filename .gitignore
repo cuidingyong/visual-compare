@@ -5,6 +5,8 @@
 .coverage
 *.sqlite3
 
+/visual_compare.egg-info
+
 venv/
 dist/
 build/

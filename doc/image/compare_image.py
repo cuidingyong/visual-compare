@@ -29,6 +29,8 @@ from pytesseract import Output
 from utils.downloader import is_url, download_file_from_url
 from .ocr import EastTextExtractor
 
+logger = logging.getLogger(__name__)
+
 EAST_CONFIDENCE = 0.5
 
 
@@ -71,7 +73,7 @@ class CompareImage(object):
         self.load_text_content_and_identify_masks()
 
         toc = time.perf_counter()
-        print(f"Compare Image Object created in {toc - tic:0.4f} seconds")
+        logger.debug(f"Compare Image Object created in {toc - tic:0.4f} seconds")
 
     def convert_mupdf_to_opencv_image(self, resolution=None):
         self.opencv_images = []
@@ -81,7 +83,7 @@ class CompareImage(object):
         try:
             self.mu_pdf_doc = fitz.open(self.image)
             toc = time.perf_counter()
-            print(f"Rendering document to PyMuPDF Image performed in {toc - tic:0.4f} seconds")
+            logger.debug(f"Rendering document to PyMuPDF Image performed in {toc - tic:0.4f} seconds")
             # split pages
             tic = time.perf_counter()
             for i, page in enumerate(self.mu_pdf_doc.pages()):
@@ -94,7 +96,7 @@ class CompareImage(object):
                 self.opencv_images.append(opencv_image)
                 pass
             toc = time.perf_counter()
-            print(f"Conversion from PyMuPDF Image to OpenCV Image performed in {toc - tic:0.4f} seconds")
+            logger.debug(f"Conversion from PyMuPDF Image to OpenCV Image performed in {toc - tic:0.4f} seconds")
         except:
             raise AssertionError("File could not be converted by ImageMagick to OpenCV Image: {}".format(self.image))
 
@@ -140,7 +142,7 @@ class CompareImage(object):
     def increase_resolution_for_ocr(self):
         # experimental: IF OCR is used and DPI is lower than self.MINIMUM_OCR_RESOLUTION DPI, re-render with self.MINIMUM_OCR_RESOLUTION DPI
         if self.DPI < self.MINIMUM_OCR_RESOLUTION:
-            print("Re-Render document for OCR at {} DPI as current resolution is only {} DPI".format(
+            logger.info("Re-Render document for OCR at {} DPI as current resolution is only {} DPI".format(
                 self.MINIMUM_OCR_RESOLUTION, self.DPI))
             if self.extension == '.pdf':
                 self.convert_mupdf_to_opencv_image(resolution=self.MINIMUM_OCR_RESOLUTION)
@@ -153,8 +155,9 @@ class CompareImage(object):
                 # Check if any page has a width or height higher than 32767 pixels
                 # If so, do not re-render as this will cause an error
                 if (width > 32767) or (height > 32767):
-                    print("Re-rendering of image for OCR not possible as one of the pages has a width or height higher "
-                          "than 32767 pixels")
+                    logger.warning(
+                        "Re-rendering of image for OCR not possible as one of the pages has a width or height higher "
+                        "than 32767 pixels")
                     return
                 dim = (width, height)
                 # resize image
@@ -175,10 +178,10 @@ class CompareImage(object):
                 with open(self.placeholder_file, 'r') as f:
                     placeholders = json.load(f)
             except IOError as err:
-                print("Placeholder File %s is not accessible", self.placeholder_file)
-                print("I/O error: {0}".format(err))
+                logger.error("Placeholder File %s is not accessible", self.placeholder_file)
+                logger.error("I/O error: {0}".format(err))
             except:
-                print("Unexpected error:", sys.exc_info()[0])
+                logger.error("Unexpected error:", sys.exc_info()[0])
                 raise
         elif self.mask is not None:
             if isinstance(self.mask, dict):
@@ -189,7 +192,7 @@ class CompareImage(object):
                 try:
                     placeholders = json.loads(self.mask)
                 except:
-                    print('The mask {} could not be read as JSON'.format(self.mask))
+                    logger.error('The mask {} could not be read as JSON'.format(self.mask))
                     # Split the mask at ;
                     mask_list = self.mask.split(';')
                     for mask in mask_list:
@@ -204,7 +207,8 @@ class CompareImage(object):
                                     placeholders.append(
                                         {'page': 'all', 'type': 'area', 'location': location, 'percent': percent})
                                 else:
-                                    print('The mask {} is not valid. The percent value is not a number'.format(mask))
+                                    logger.warning(
+                                        'The mask {} is not valid. The percent value is not a number'.format(mask))
         if placeholders is not None:
             if not isinstance(placeholders, list):
                 placeholders = [placeholders]
@@ -248,7 +252,7 @@ class CompareImage(object):
                     else:
                         for i in range(len(self.opencv_images)):
                             if placeholder_type == 'word_pattern':
-                                print("Searching word_pattern")
+                                logger.info("Searching word_pattern")
                                 words = self.mu_pdf_doc[i].get_text("words")
                                 search_pattern = re.compile(pattern)
                                 for word in words:
@@ -260,7 +264,7 @@ class CompareImage(object):
                                                              "height": h + 2 * yoffset, "width": w + 2 * xoffset}
                                         self.placeholders.append(text_pattern_mask)
                             if placeholder_type == 'pattern' or placeholder_type == 'line_pattern':
-                                print("Searching line_pattern")
+                                logger.info("Searching line_pattern")
                                 tdict = json.loads(self.mu_pdf_doc[i].get_text("json"))
                                 search_pattern = re.compile(pattern)
                                 for block in tdict['blocks']:
@@ -278,8 +282,7 @@ class CompareImage(object):
                                                 self.placeholders.append(text_pattern_mask)
 
                 elif placeholder_type == 'coordinates':
-                    # print("Coordinates placeholder identified:")
-                    # print(placeholder)
+                    logger.info(f"Coordinates placeholder identified: {placeholder}")
                     page = placeholder.get('page', 'all')
                     unit = placeholder.get('unit', 'px')
                     x, y, h, w = 0, 0, 0, 0
@@ -311,7 +314,7 @@ class CompareImage(object):
                         image_height = self.opencv_images[page - 1].shape[0]
                         image_width = self.opencv_images[page - 1].shape[1]
                     else:
-                        print("Invalid page number, will apply to all pages")
+                        logger.warning("Invalid page number, will apply to all pages")
                         page = 'all'
                         image_height = self.opencv_images[0].shape[0]
                         image_width = self.opencv_images[0].shape[1]
@@ -342,12 +345,12 @@ class CompareImage(object):
             qrcode_detector = cv2.QRCodeDetector()
             barcode_detector = cv2.barcode.BarcodeDetector()
         except:
-            print("OpenCV contrib package is not installed, barcode detection is not available. Make sure to install "
-                  "opencv-contrib-python")
+            logger.error(
+                "OpenCV contrib package is not installed, barcode detection is not available. Make sure to install opencv-contrib-python")
             return
 
         for i in range(len(self.opencv_images)):
-            print("Identify barcodes")
+            logger.info("Identify barcodes")
             image_height = self.opencv_images[i].shape[0]
             image_width = self.opencv_images[i].shape[1]
             # Detect QR code
@@ -381,7 +384,7 @@ class CompareImage(object):
         try:
             from pyzbar import pyzbar
         except:
-            logging.debug('Failed to import pyzbar', exc_info=True)
+            logger.debug('Failed to import pyzbar', exc_info=True)
             return
         for i in range(len(self.opencv_images)):
             print("Identify barcodes")
@@ -404,7 +407,7 @@ class CompareImage(object):
         try:
             from pylibdmtx import pylibdmtx
         except:
-            logging.debug('Failed to import pylibdmtx', exc_info=True)
+            logger.debug('Failed to import pylibdmtx', exc_info=True)
             return
         for i in range(len(self.opencv_images)):
             print("Identify datamatrices")
@@ -412,7 +415,7 @@ class CompareImage(object):
             try:
                 barcodes = pylibdmtx.decode(self.opencv_images[i], timeout=5000)
             except:
-                logging.debug("pylibdmtx could not be loaded", exc_info=True)
+                logger.debug("pylibdmtx could not be loaded", exc_info=True)
                 return
             # Add barcode as placehoder
             for barcode in barcodes:
