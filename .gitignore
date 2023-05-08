@@ -1,0 +1,12 @@
+**.pyc
+.cache
+.idea
+.tox
+.coverage
+*.sqlite3
+
+venv/
+dist/
+build/
+screenshots/
+.pytest_cache/
