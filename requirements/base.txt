@@ -10,3 +10,4 @@ PyMuPDF~=1.22
 pyzbar~=0.1.9
 pylibdmtx~=0.1.10
 Wand~=0.6.11
+deepdiff~=6.3.0

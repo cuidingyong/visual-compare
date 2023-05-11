@@ -18,7 +18,7 @@ import time
 import uuid
 from concurrent import futures
 from pathlib import Path
-from typing import Union
+from typing import Union, List
 
 import cv2
 import fitz
@@ -28,7 +28,7 @@ import pytesseract
 from skimage import metrics
 
 from visual_compare.doc.image.compare_image import CompareImage
-from visual_compare.utils.downloader import is_url
+from visual_compare.utils.common import is_url
 
 logger = logging.getLogger(__name__)
 
@@ -45,6 +45,7 @@ class VisualTest(object):
     FONT_SCALE = 0.7
     FONT_COLOR = (255, 0, 0)
     LINE_TYPE = 2
+    THRESHOLD = 0.95
     REFERENCE_LABEL = "Expected Result (Reference)"
     CANDIDATE_LABEL = "Actual Result (Candidate)"
     OCR_ENGINE = "tesseract"
@@ -90,7 +91,35 @@ class VisualTest(object):
     def is_different(self):
         return self._is_different
 
-    def compare_images(self, reference_image: str, test_image: str, placeholder_file: str = None,
+    @staticmethod
+    def generate_mask(reference_image: str, mask_images: Union[str, List[str]], threshold=THRESHOLD):
+        """Generate mask base on ``reference_image`` and ``test_image``
+
+        Result is a json for mask when matched success, otherwise None
+
+        | =Arguments= | =Description= |
+        | ``reference_image`` | Path or URL of the Reference Image/Document, your expected result. May be .pdf, .ps, .pcl or image files |
+        | ``mask_images`` | List of the path or URL of the Reference Image/Document, your expected result. May be .pdf, .ps, .pcl or image files |
+        | ``threshold`` | Threshold for doc comparison between 0.0000 and 1.0000 . Default is 0.95. Higher values means that the documents are more similar. |
+
+        Return Examples:
+        | [{'type': 'coordinates', 'page': 'all', 'x': 724, 'y': 341, 'width': 139, 'height': 44}]
+        | None
+
+        """
+        from visual_compare.doc.image.image import MatchImg
+
+        mask = []
+        if isinstance(mask_images, str):
+            mask_images = [mask_images]
+        m_img = MatchImg(threshold=threshold)
+        for mi in mask_images:
+            res = m_img.parse_mask(source=reference_image, temp=mi)
+            mask.extend(res)
+
+        return mask if len(mask) > 0 else None
+
+    def compare_images(self, reference_image: str, test_image: str, placeholder_file: Union[str, list] = None,
                        mask: Union[str, dict, list] = None, check_text_content: bool = False,
                        move_tolerance: int = None, contains_barcodes: bool = False, get_pdf_content: bool = False,
                        force_ocr: bool = False, dpi: int = None, watermark_file: str = None,
@@ -123,8 +152,6 @@ class VisualTest(object):
         | mask={"page": "all", type: "coordinates", "x": 0, "y": 0, "width": 100, "height": 100}
 
         """
-        # print("Execute comparison")
-        # print('Resolution for image comparison is: {}'.format(self.DPI))
 
         reference_collection = []
         compare_collection = []
@@ -143,6 +170,9 @@ class VisualTest(object):
             ocr_engine = self.ocr_engine
         if threshold is None:
             threshold = self.threshold
+
+        if mask:
+            threshold = threshold + 0.0001
 
         compare_options = {'get_pdf_content': get_pdf_content, 'ignore_watermarks': ignore_watermarks,
                            'check_text_content': check_text_content, 'contains_barcodes': contains_barcodes,

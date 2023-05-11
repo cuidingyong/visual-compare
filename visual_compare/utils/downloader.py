@@ -11,24 +11,13 @@
                     2023/5/6
 -------------------------------------------------
 """
+import os
 import tempfile
 import uuid
-from urllib import parse, request
-import os
+from urllib import request
 
 
-def is_url(url):
-    """
-    Check if the provided string is a valid URL.
-    """
-    try:
-        result = parse.urlparse(url)
-        return all([result.scheme, result.netloc])
-    except:
-        return False
-
-
-def download_file_from_url(url, directory=None, filename=None):
+def download_file_from_url(url: str, directory=None, filename=None):
     """
     Download the file from the url and save it in the provided directory.
     If directory is None, save it in a temp directory.

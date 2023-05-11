@@ -26,8 +26,10 @@ import numpy as np
 import pytesseract
 from pytesseract import Output
 
-from visual_compare.utils.downloader import is_url, download_file_from_url
+from visual_compare.utils.downloader import download_file_from_url
 from .ocr import EastTextExtractor
+from ..match import MatchPdf
+from visual_compare.utils.common import is_url
 
 logger = logging.getLogger(__name__)
 
@@ -174,15 +176,22 @@ class CompareImage(object):
     def identify_placeholders(self):
         placeholders = None
         if self.placeholder_file is not None:
-            try:
-                with open(self.placeholder_file, 'r') as f:
-                    placeholders = json.load(f)
-            except IOError as err:
-                logger.error("Placeholder File %s is not accessible", self.placeholder_file)
-                logger.error("I/O error: {0}".format(err))
-            except:
-                logger.error("Unexpected error:", sys.exc_info()[0])
-                raise
+            if isinstance(self.placeholder_file, list):
+                placeholders = []
+                for pf in self.placeholder_file:
+                    if self.is_image(pf):
+                        mi = MatchPdf(self.opencv_images[0], pf)
+                        placeholders.extend(mi.mask)
+            elif isinstance(self.placeholders, str):
+                try:
+                    with open(self.placeholder_file, 'r') as f:
+                        placeholders = json.load(f)
+                except IOError as err:
+                    logger.error("Placeholder File %s is not accessible", self.placeholder_file)
+                    logger.error("I/O error: {0}".format(err))
+                except:
+                    logger.error("Unexpected error:", sys.exc_info()[0])
+                    raise
         elif self.mask is not None:
             if isinstance(self.mask, dict):
                 placeholders = self.mask
@@ -542,6 +551,13 @@ class CompareImage(object):
                 print(f"Conversion from pyWand Image to OpenCV Image performed in {toc - tic:0.4f} seconds")
         except:
             raise AssertionError("File could not be converted by ImageMagick to OpenCV Image: {}".format(self.image))
+
+    @staticmethod
+    def is_image(image: str):
+        import filetype
+        mr = filetype.image_match(image)
+
+        return False if mr is None else True
 
 
 def make_text(words):
