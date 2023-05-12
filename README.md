@@ -28,7 +28,7 @@ assert vt.is_different is True
 
  Result as follows
 
-![1.jpg](files/result/1.jpg)
+![1.jpg](https://github.com/cuidingyong/visual-compare/raw/main/files/result/1.jpg)
 
 ### Compare images with mask ###
 
@@ -51,4 +51,4 @@ assert vt.is_different is True
 
  Result as follows
 
-![2.jpg](files/result/2.jpg)
+![2.jpg](https://github.com/cuidingyong/visual-compare/raw/main/files/result/2.jpg)
