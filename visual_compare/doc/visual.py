@@ -28,12 +28,12 @@ import pytesseract
 from skimage import metrics
 
 from visual_compare.doc.image.compare_image import CompareImage
-from visual_compare.utils.common import is_url
+from visual_compare.utils.common import is_url, check_file_exist
 
 logger = logging.getLogger(__name__)
 
 
-class VisualTest(object):
+class Visual(object):
     ROBOT_LIBRARY_VERSION = 0.2
     BORDER_FOR_MOVE_TOLERANCE_CHECK = 0
     DPI_DEFAULT = 200
@@ -51,7 +51,8 @@ class VisualTest(object):
     OCR_ENGINE = "tesseract"
     MOVEMENT_DETECTION = "classic"
 
-    def __init__(self, threshold: float = 0.0000, dpi: int = DPI_DEFAULT, take_screenshots: bool = False,
+    def __init__(self, threshold: float = 0.0000, dpi: int = DPI_DEFAULT,
+                 take_screenshots: bool = False,
                  show_diff: bool = False, ocr_engine: str = OCR_ENGINE, movement_detection: str = MOVEMENT_DETECTION,
                  watermark_file: str = None, screenshot_dir: str = None, screenshot_format: str = 'jpg', **kwargs):
         """
@@ -87,12 +88,16 @@ class VisualTest(object):
 
         self._is_different = False
 
+        # self.check_exist([reference_image, test_image])
+
+        self.reference_image = None
+        self.test_image = None
+
     @property
     def is_different(self):
         return self._is_different
 
-    @staticmethod
-    def generate_mask(reference_image: str, mask_images: Union[str, List[str]], threshold=THRESHOLD):
+    def generate_mask(self, reference_image: str, mask_images: Union[str, List[str]], threshold=THRESHOLD):
         """Generate mask base on ``reference_image`` and ``test_image``
 
         Result is a json for mask when matched success, otherwise None
@@ -110,11 +115,18 @@ class VisualTest(object):
         from visual_compare.doc.image.image import MatchImg
 
         mask = []
+
+        check_file_exist(mask_images)
+
         if isinstance(mask_images, str):
             mask_images = [mask_images]
+        ci = CompareImage(reference_image, DPI=self.DPI)
+        reference_opencv_images = ci.opencv_images
+        self.reference_image = ci.image
+
         m_img = MatchImg(threshold=threshold)
         for mi in mask_images:
-            res = m_img.parse_mask(source=reference_image, temp=mi)
+            res = m_img.parse_mask(source=reference_opencv_images, temp=mi)
             mask.extend(res)
 
         return mask if len(mask) > 0 else None
@@ -268,7 +280,7 @@ class VisualTest(object):
         toc = time.perf_counter()
         logger.debug(f"Visual Image comparison performed in {toc - tic:0.4f} seconds")
 
-        return screenshot_names
+        return self._is_different, screenshot_names
 
     @staticmethod
     def get_images_with_highlighted_differences(thresh, reference, candidate, extension=10):

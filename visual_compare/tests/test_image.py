@@ -30,9 +30,17 @@ class TestImage:
         res = self.cls().parse_mask(img1, img11)
         print(res)
 
-    def test_parse_mask(self):
+    def test_parse_mask_old(self):
         img1 = self.get_path('123.png')
         img11 = self.get_path('000.png')
         img2 = self.get_path('124.png')
+        res = self.cls().parse_mask(img1, img11)
+        print(res)
+
+    def test_parse_mask1(self):
+        from visual_compare.doc.image.compare_image import CompareImage
+        img = self.get_path('111.pdf')
+        img1 = CompareImage(img).opencv_images
+        img11 = self.get_path('333.png')
         res = self.cls().parse_mask(img1, img11)
         print(res)

@@ -11,6 +11,8 @@
                     2023/5/6
 -------------------------------------------------
 """
+from typing import Union
+
 import cv2
 import numpy
 import os
@@ -48,10 +50,13 @@ class MatchImg:
     def __init__(self, threshold=0.95, match_method=cv2.TM_CCOEFF_NORMED):
         self.threshold = threshold
         self.match_method = match_method
+        self.match = []
 
     def match_temp(self, source_image, temp_image, threshold, method=cv2.TM_CCOEFF_NORMED):
         if threshold is None:
             threshold = self.threshold
+        source_image = self.uniform_channel(source_image)
+        temp_image = self.uniform_channel(temp_image)
         try:
             mt = cv2.matchTemplate(source_image, temp_image, method)
             locations = numpy.where(mt >= threshold)
@@ -60,14 +65,43 @@ class MatchImg:
         except cv2.error as e:
             print(e)
 
-    def parse_mask(self, source: str, temp: str, threshold=None, match_method=cv2.TM_CCOEFF_NORMED, mask_type='coordinates', page='all'):
-        source_img = Image(source)
-        temp_img = Image(temp)
+    @staticmethod
+    def uniform_channel(img):
+        if img.shape[2] == 4:
+            img = img[:, :, :3]
 
-        mask_list = []
-        match_list = self.match_temp(source_img.image, temp_img.image, threshold, match_method)
-        for m in match_list:
-            mask = Mask(type=mask_type, page=page, x=m[0], y=m[1], width=temp_img.width, height=temp_img.height)
-            mask_list.append(mask.dict())
+        return img
 
-        return mask_list
+    # def parse_mask(self, source: str, temp: str, threshold=None, match_method=cv2.TM_CCOEFF_NORMED,
+    #                mask_type='coordinates', page: Union[str, int] = 'all'):
+    #     source_img = Image(source)
+    #     temp_img = Image(temp)
+    # 
+    #     mask_list = []
+    #     match_list = self.match_temp(source_img.image, temp_img.image, threshold, match_method)
+    #     for m in match_list:
+    #         mask = Mask(type=mask_type, page=1, x=m[0], y=m[1], width=temp_img.width, height=temp_img.height)
+    #         mask_list.append(mask.dict())
+    # 
+    #     return mask_list
+
+    def parse_mask(self, source: Union[str, list], temp: Union[str, list], threshold=None,
+                   match_method=cv2.TM_CCOEFF_NORMED, mask_type='coordinates'):
+        if isinstance(source, str):
+            source = [source]
+        if isinstance(temp, str):
+            temp = [temp]
+        for i, s in enumerate(source):
+            # sii = Image(s)
+            for t in temp:
+                ti = Image(t)
+                match_list = self.match_temp(s, ti.image, threshold, match_method)
+                if match_list:
+                    self.collect(match_list, ti.width, ti.height, mask_type, i + 1)
+
+        return self.match
+
+    def collect(self, match_list: list, width: int, height: int, mask_type: str, page: int):
+        for mt in match_list:
+            m = Mask(type=mask_type, page=page, x=mt[0], y=mt[1], width=width, height=height)
+            self.match.append(m.dict())

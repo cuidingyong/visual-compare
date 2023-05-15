@@ -12,12 +12,12 @@
 -------------------------------------------------
 """
 from pydantic import BaseModel
-from typing import Text
+from typing import Text, Union
 
 
 class Mask(BaseModel):
     type: Text
-    page: Text
+    page: Union[int, Text]
     x: int
     y: int
     width: int

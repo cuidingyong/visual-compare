@@ -12,7 +12,7 @@ pip install visual-compare
 ### Compare images ###
 
 ```python
-from visual_compare.doc.visual_test import VisualTest
+from visual_compare.doc.visual import Visual
 
 def get_path(filename):
     image_base = '../../files/images/'
@@ -20,10 +20,10 @@ def get_path(filename):
 
 reference_image = get_path('123.png')
 test_image = get_path('124.png')
-vt = VisualTest()
-res = vt.compare_images(reference_image, test_image)
+vt = Visual()
+is_diff, res = vt.compare_images(reference_image, test_image)
 print(res)
-assert vt.is_different is True
+assert is_diff is True
 ```
 
  Result as follows
@@ -33,7 +33,7 @@ assert vt.is_different is True
 ### Compare images with mask ###
 
 ```python
-from visual_compare.doc.visual_test import VisualTest
+from visual_compare.doc.visual import Visual
 
 def get_path(filename):
     image_base = '../../files/images/'
@@ -42,11 +42,11 @@ def get_path(filename):
 reference_image = get_path('123.png')
 test_image = get_path('124.png')
 mask_images = [get_path('000.png')]
-vt = VisualTest()
+vt = Visual()
 mask = vt.generate_mask(reference_image, mask_images)
-res = vt.compare_images(reference_image, test_image, mask=mask)
+is_diff, res = vt.compare_images(reference_image, test_image, mask=mask)
 print(res)
-assert vt.is_different is True
+assert is_diff is True
 ```
 
  Result as follows
