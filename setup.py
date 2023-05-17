@@ -9,7 +9,7 @@ with open(path.join(here, "README.md"), encoding="utf-8") as f:
 
 setup(
     name="visual-compare",
-    version="1.0.0",
+    version="1.0.1",
     description="Image and PDF Compare",
     long_description=long_description,
     long_description_content_type="text/markdown",
@@ -41,7 +41,9 @@ setup(
         "PyMuPDF~=1.22",
         "pyzbar~=0.1.9",
         "pylibdmtx~=0.1.10",
-        "Wand~=0.6.11"
+        "Wand~=0.6.11",
+        "pydantic~=1.8.2",
+        "deepdiff~=6.3.0"
     ],
     zip_safe=False,
 )
