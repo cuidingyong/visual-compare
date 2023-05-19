@@ -941,8 +941,13 @@ class Visual(object):
 
     @staticmethod
     def highlight_differences(image, contents):
+        ratio = 2
         for c in contents:
-            cv2.rectangle(image, (c.x, c.y), (c.x + c.width, c.y + c.height), (0, 0, 255), 4)
+            x = max(0, c.x - ratio - 1)
+            y = max(0, c.y - ratio - 1)
+            x2 = c.x + c.width + ratio
+            y2 = c.y + c.height + ratio
+            cv2.rectangle(image, (x, y), (x2, y2), (0, 0, 255), 2)
 
         return image
 

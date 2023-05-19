@@ -72,9 +72,17 @@ class TestVisual:
         assert is_diff is True
 
     def test_compare_images_with_force_ocr_and_ch(self):
-        img1 = self.get_path('123.png')
-        img2 = self.get_path('124.png')
+        img1 = self.get_path('c10b.png')
+        img2 = self.get_path('c10a.png')
         cls = self.cls()
         is_diff, res = cls.compare_images(img1, img2, force_ocr=True, lang=['ch_sim', 'en'])
+        print(res)
+        assert is_diff is True
+
+    def test_compare_images_with_force_ocr_and_default_lang(self):
+        img1 = self.get_path('c10a.png')
+        img2 = self.get_path('c10b.png')
+        cls = self.cls()
+        is_diff, res = cls.compare_images(img1, img2, force_ocr=True)
         print(res)
         assert is_diff is True
