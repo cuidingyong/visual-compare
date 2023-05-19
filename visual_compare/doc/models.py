@@ -22,3 +22,11 @@ class Mask(BaseModel):
     y: int
     width: int
     height: int
+
+
+class Contour(BaseModel):
+    text: Text
+    x: int
+    y: int
+    width: int
+    height: int

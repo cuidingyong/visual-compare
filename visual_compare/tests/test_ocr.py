@@ -12,9 +12,11 @@
 -------------------------------------------------
 """
 import cv2
+import numpy
 from pytesseract import pytesseract
 
 from visual_compare.doc.image.compare_image import CompareImage
+from visual_compare.doc.image.ocr import EastTextExtractor
 
 
 class TestOcr:
@@ -64,19 +66,44 @@ class TestOcr:
         import torch
         pth_file = r'C:\Users\dingyong.cui\.EasyOCR\model\japanese_g2.pth'
         net = torch.load(pth_file, map_location=torch.device('cpu'))
-        print(net['model'])
         for k, v in dict(net).items():
             print(k)
             print(v)
 
     def test_x(self):
         import easyocr
-        img1 = self.get_path('1.jpg')
+        # img1 = self.get_path('1.jpg')
+        img1 = self.get_path('y11.png')
+        img2 = self.get_path('y11.png')
         img_np = cv2.imread(img1)
         img_gray = cv2.cvtColor(img_np, cv2.COLOR_BGR2GRAY)
         # 阈值二进制 - > 127 设置为255(白)，否则0(黑) -> 淡白得更白,淡黑更黑
-        _, img_thresh = cv2.threshold(img_gray, 170, 255, cv2.THRESH_BINARY)
-        # 图像 OCR 识别
-        reader = easyocr.Reader(['ja', 'en'], detector=True, recognizer=True)
-        text = reader.readtext(img_thresh, detail=0, batch_size=1, paragraph=True)
-        print(text)
+        _, img_thresh = cv2.threshold(img_gray, 127, 255, cv2.THRESH_BINARY | cv2.THRESH_OTSU)
+
+        # img = cv2.rectangle(img_np, (20, 8), (96, 36), (0, 0, 255), 4)
+        # cv2.imshow('test', img)
+        # cv2.waitKey(0)
+
+        # 图像 OCR 识别 paragraph-是否返回匹配度
+        # reader = easyocr.Reader(['en', 'ja'], detector=True, recognizer=True)
+        reader = easyocr.Reader(['en', 'ja'], detector=True, recognizer=True)
+        text1 = reader.readtext(img_thresh, detail=1, batch_size=1, paragraph=False, contrast_ths=0.5,
+                                adjust_contrast=0.8)
+
+        img_np2 = cv2.imread(img2)
+        img_gray2 = cv2.cvtColor(img_np2, cv2.COLOR_BGR2GRAY)
+        # 阈值二进制 - > 127 设置为255(白)，否则0(黑) -> 淡白得更白,淡黑更黑
+        _, img_thresh2 = cv2.threshold(img_gray2, 170, 255, cv2.THRESH_BINARY | cv2.THRESH_OTSU)
+        text2 = reader.readtext(img_thresh2, detail=1, batch_size=1, paragraph=True)
+        print(text1)
+        print(text2)
+
+    def test_1(self):
+        img1 = self.get_path('y11.png')
+        oi = CompareImage(img1).opencv_images[0]
+        x = EastTextExtractor().get_image_text_and_coordinate(oi)
+        print(x)
+
+    def test_0(self):
+        cnt = numpy.array([[53, 89], [281, 89], [281, 109], [53, 109]])
+        cv2.boundingRect(cnt)

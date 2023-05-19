@@ -44,3 +44,19 @@ class TestImage:
         img11 = self.get_path('333.png')
         res = self.cls().parse_mask(img1, img11)
         print(res)
+
+    def test_ocr_image_equal(self):
+        from visual_compare.doc.image.image import OcrImage
+        from visual_compare.doc.models import Contour
+        ct1 = Contour(text='w ア イ ア ル\n', x=1317, y=932, width=30, height=18)
+        ct2 = Contour(text='w アイ アル\n', x=1318, y=933, width=30, height=18)
+        oi = OcrImage(**ct1.dict())
+        assert oi.equal(ct2) is True
+
+    def test_ocr_image_not_equal(self):
+        from visual_compare.doc.image.image import OcrImage
+        from visual_compare.doc.models import Contour
+        ct1 = Contour(text='w ア イ ア ル\n', x=1317, y=932, width=30, height=18)
+        ct2 = Contour(text='w アイ アル\n', x=1318, y=933, width=30, height=18)
+        oi = OcrImage(**ct1.dict())
+        assert oi.equal(ct2, coordinate_eq=True) is False

@@ -28,6 +28,7 @@ import pytesseract
 from skimage import metrics
 
 from visual_compare.doc.image.compare_image import CompareImage
+from visual_compare.doc.models import Contour
 from visual_compare.utils.common import is_url, check_file_exist
 
 logger = logging.getLogger(__name__)
@@ -50,11 +51,15 @@ class Visual(object):
     CANDIDATE_LABEL = "Actual Result (Candidate)"
     OCR_ENGINE = "tesseract"
     MOVEMENT_DETECTION = "classic"
+    LANG_DEFAULT = 'en'
+    CONTRAST_THS_DEFAULT = 0.4
+    ADJUST_CONTRAST_DEFAULT = 0.6
 
     def __init__(self, threshold: float = 0.0000, dpi: int = DPI_DEFAULT,
                  take_screenshots: bool = False,
                  show_diff: bool = False, ocr_engine: str = OCR_ENGINE, movement_detection: str = MOVEMENT_DETECTION,
-                 watermark_file: str = None, screenshot_dir: str = None, screenshot_format: str = 'jpg', **kwargs):
+                 watermark_file: str = None, screenshot_dir: str = None, screenshot_format: str = 'jpg',
+                 lang: list = None, contrast_ths: float = None, adjust_contrast: float = None, **kwargs):
         """
         | =Arguments= | =Description= |
         | ``take_screenshots`` | Shall screenshots be taken also for passed comparisons.   |
@@ -85,10 +90,17 @@ class Visual(object):
             self.screenshot_dir = Path.cwd() / Path("screenshots/")
         if not (self.screenshot_format == 'jpg' or self.screenshot_format == 'png'):
             self.screenshot_format = 'jpg'
+        self.lang = self.LANG_DEFAULT
+        if lang:
+            self.lang = lang
+        self.contrast_ths = self.CONTRAST_THS_DEFAULT
+        if contrast_ths:
+            self.contrast_ths = contrast_ths
+        self.adjust_contrast = self.ADJUST_CONTRAST_DEFAULT
+        if adjust_contrast:
+            self.adjust_contrast = adjust_contrast
 
         self._is_different = False
-
-        # self.check_exist([reference_image, test_image])
 
         self.reference_image = None
         self.test_image = None
@@ -136,7 +148,9 @@ class Visual(object):
                        move_tolerance: int = None, contains_barcodes: bool = False, get_pdf_content: bool = False,
                        force_ocr: bool = False, dpi: int = None, watermark_file: str = None,
                        ignore_watermarks: bool = None, ocr_engine: str = None, resize_candidate: bool = False,
-                       blur: bool = False, threshold: float = None, **kwargs):
+                       blur: bool = False, lang: list = None, threshold: float = None, contrast_ths: float = None,
+                       adjust_contrast: float = None, coordinate_eq: bool = False, strip: bool = True,
+                       space_remove: bool = True, **kwargs):
         """Compares the documents/images ``reference_image`` and ``test_image``.
 
         Result is passed if no doc differences are detected.
@@ -182,6 +196,12 @@ class Visual(object):
             ocr_engine = self.ocr_engine
         if threshold is None:
             threshold = self.threshold
+        if lang is None:
+            lang = self.lang
+        if contrast_ths is None:
+            contrast_ths = self.contrast_ths
+        if adjust_contrast is None:
+            adjust_contrast = self.adjust_contrast
 
         if mask:
             threshold = threshold + 0.0001
@@ -190,7 +210,8 @@ class Visual(object):
                            'check_text_content': check_text_content, 'contains_barcodes': contains_barcodes,
                            'force_ocr': force_ocr, 'move_tolerance': move_tolerance, 'watermark_file': watermark_file,
                            'ocr_engine': ocr_engine, 'resize_candidate': resize_candidate, 'blur': blur,
-                           'threshold': threshold}
+                           'threshold': threshold, 'coordinate_eq': coordinate_eq, 'strip': strip,
+                           'space_remove': space_remove}
 
         if (os.path.isfile(reference_image) is False) and (is_url(reference_image) is False):
             raise AssertionError(
@@ -205,10 +226,13 @@ class Visual(object):
                                                         placeholder_file=placeholder_file,
                                                         contains_barcodes=contains_barcodes,
                                                         get_pdf_content=get_pdf_content, DPI=self.DPI,
-                                                        force_ocr=force_ocr, mask=mask, ocr_engine=ocr_engine)
+                                                        force_ocr=force_ocr, mask=mask, ocr_engine=ocr_engine,
+                                                        lang=lang, contrast_ths=contrast_ths,
+                                                        adjust_contrast=adjust_contrast)
             candidate_future = parallel_executor.submit(
                 CompareImage, test_image, contains_barcodes=contains_barcodes, get_pdf_content=get_pdf_content,
-                DPI=self.DPI)
+                DPI=self.DPI, force_ocr=force_ocr, lang=lang, contrast_ths=contrast_ths,
+                adjust_contrast=adjust_contrast)
             reference_compare_image = reference_future.result()
             candidate_compare_image = candidate_future.result()
 
@@ -245,20 +269,33 @@ class Visual(object):
         check_difference_results = []
         with futures.ThreadPoolExecutor(max_workers=8) as parallel_executor:
             for i, (reference, candidate) in enumerate(zip(reference_collection, compare_collection)):
-                if get_pdf_content:
+                if force_ocr:
                     try:
-                        reference_pdf_content = reference_compare_image.mu_pdf_doc[i]
-                        candidate_pdf_content = candidate_compare_image.mu_pdf_doc[i]
-                    except:
-                        reference_pdf_content = reference_compare_image.mu_pdf_doc[0]
-                        candidate_pdf_content = candidate_compare_image.mu_pdf_doc[0]
+                        reference_text_content = reference_compare_image.ocr_text_contents[i]
+                        candidate_text_content = candidate_compare_image.ocr_text_contents[i]
+                    except IndexError:
+                        reference_text_content = reference_compare_image.ocr_text_contents[0]
+                        candidate_text_content = candidate_compare_image.ocr_text_contents[0]
+                    # print('reference -> ', reference_text_content)
+                    # print('candidate -> ', candidate_text_content)
+                    check_difference_results.append(parallel_executor.submit(
+                        self.check_for_ocr_differences, reference, candidate, i, detected_differences,
+                        screenshot_names, compare_options, reference_text_content, candidate_text_content))
                 else:
-                    reference_pdf_content = None
-                    candidate_pdf_content = None
-                check_difference_results.append(parallel_executor.submit(
-                    self.check_for_differences, reference, candidate, i, detected_differences, screenshot_names,
-                    compare_options,
-                    reference_pdf_content, candidate_pdf_content))
+                    if get_pdf_content:
+                        try:
+                            reference_pdf_content = reference_compare_image.mu_pdf_doc[i]
+                            candidate_pdf_content = candidate_compare_image.mu_pdf_doc[i]
+                        except IndexError:
+                            reference_pdf_content = reference_compare_image.mu_pdf_doc[0]
+                            candidate_pdf_content = candidate_compare_image.mu_pdf_doc[0]
+                    else:
+                        reference_pdf_content = None
+                        candidate_pdf_content = None
+                    check_difference_results.append(parallel_executor.submit(
+                        self.check_for_differences, reference, candidate, i, detected_differences, screenshot_names,
+                        compare_options,
+                        reference_pdf_content, candidate_pdf_content))
         for result in check_difference_results:
             if result.exception() is not None:
                 raise result.exception()
@@ -530,8 +567,10 @@ class Visual(object):
 
             diff = (diff * 255).astype("uint8")
 
-            thresh = cv2.threshold(diff, 0, 255,
-                                   cv2.THRESH_BINARY_INV | cv2.THRESH_OTSU)[1]
+            # thresh = cv2.threshold(diff, 0, 255,
+            #                        cv2.THRESH_BINARY_INV | cv2.THRESH_OTSU)[1]
+            thresh = cv2.threshold(diff, 127, 255,
+                                   cv2.THRESH_BINARY_INV)[1]
 
             reference_with_rect, candidate_with_rect, contours = self.get_images_with_highlighted_differences(
                 thresh, reference.copy(), candidate.copy(), extension=int(os.getenv('EXTENSION', 2)))
@@ -865,6 +904,91 @@ class Visual(object):
                                             diff_area_reference, diff_area_candidate), "_diff_area_blended")
             if images_are_equal is not True:
                 detected_differences.append(True)
+
+    def check_for_ocr_differences(self, reference, candidate, i, detected_differences, screenshot_names,
+                                  compare_options, reference_text_content, candidate_text_content):
+        # reference_collections = reference_compare_image.opencv_images
+        # candidate_collections = candidate_compare_image.opencv_images
+        # reference_text_contents = reference_compare_image.ocr_text_contents
+        # candidate_text_contents = candidate_compare_image.ocr_text_contents
+        # for i in range(len(reference_collections)):
+        coordinate_eq = compare_options['coordinate_eq']
+        strip = compare_options['strip']
+        space_remove = compare_options['space_remove']
+        image_contents_are_equal = True
+        while image_contents_are_equal:
+            image_contents_are_equal, reference_text_content, candidate_text_content = self.get_parts_of_different(
+                reference_text_content, candidate_text_content, coordinate_eq, strip, space_remove)
+
+        reference_with_rect = self.highlight_differences(reference.copy(), reference_text_content)
+        candidate_with_rect = self.highlight_differences(candidate.copy(), candidate_text_content)
+
+        cv2.putText(reference_with_rect, self.REFERENCE_LABEL, self.BOTTOM_LEFT_CORNER_OF_TEXT,
+                    self.FONT, self.FONT_SCALE, self.FONT_COLOR, self.LINE_TYPE)
+        cv2.putText(candidate_with_rect, self.CANDIDATE_LABEL, self.BOTTOM_LEFT_CORNER_OF_TEXT,
+                    self.FONT, self.FONT_SCALE, self.FONT_COLOR, self.LINE_TYPE)
+
+        if reference_with_rect.shape[0] != candidate_with_rect.shape[0] or reference_with_rect.shape[1] != \
+                candidate_with_rect.shape[1]:
+            candidate_with_rect = cv2.resize(
+                candidate_with_rect, (reference_with_rect.shape[1], reference_with_rect.shape[0]))
+        screenshot_name = self.add_screenshot_to_log(np.concatenate(
+            (reference_with_rect, candidate_with_rect), axis=1), "_page_" + str(i + 1) + "_rectangles_concat")
+        screenshot_names.append(screenshot_name)
+
+        if len(reference_text_content) > 0 or len(candidate_text_content) > 0:
+            detected_differences.append(True)
+
+    @staticmethod
+    def highlight_differences(image, contents):
+        for c in contents:
+            cv2.rectangle(image, (c.x, c.y), (c.x + c.width, c.y + c.height), (0, 0, 255), 4)
+
+        return image
+
+    @staticmethod
+    def get_parts_of_different(reference, candidate, coordinate_eq, strip, space_remove):
+        eq_flag = False
+        ref_res, can_res = [], []
+        la, lb = len(reference) + 1, len(candidate) + 1
+        dp = [[0 for _ in range(lb)] for _ in range(la)]
+        max_num = 0
+        max_i = 0
+        max_j = 0
+        for i in range(la - 1):
+            for j in range(lb - 1):
+                if equal(reference[i], candidate[j], coordinate_eq=coordinate_eq, strip=strip,
+                         space_remove=space_remove):
+                    dp[i + 1][j + 1] = dp[i][j] + 1
+                    if eq_flag is False:
+                        eq_flag = True
+                if dp[i + 1][j + 1] > max_num:
+                    max_num = dp[i + 1][j + 1]
+                    max_i = i + 1
+                    max_j = j + 1
+        ref_res.extend(reference[0:max_i - max_num])
+        ref_res.extend(reference[max_i:])
+        can_res.extend(candidate[0:max_j - max_num])
+        can_res.extend(candidate[max_j:])
+
+        return eq_flag, ref_res, can_res
+
+
+def equal(reference: Contour, candidate: Contour, strip: bool = True, space_remove: bool = True,
+          coordinate_eq: bool = False) -> bool:
+    if strip:
+        reference.text = reference.text.strip()
+        candidate.text = candidate.text.strip()
+    if space_remove:
+        reference.text = reference.text.replace(' ', '')
+        candidate.text = candidate.text.replace(' ', '')
+    if coordinate_eq:
+        if reference.x != candidate.x or reference.y != candidate.y or reference.width != candidate.width or reference.height != candidate.height:
+            return False
+    if reference.text == candidate.text:
+        return True
+    else:
+        return False
 
 
 def make_text(words):

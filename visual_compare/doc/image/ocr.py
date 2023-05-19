@@ -21,6 +21,9 @@ from imutils.object_detection import non_max_suppression
 import urllib
 import re
 import unicodedata
+from pytesseract import Output
+
+from visual_compare.doc.models import Contour
 
 PYTESSERACT_CONFIDENCE = 20
 
@@ -36,6 +39,48 @@ class EastTextExtractor:
         pkg_east_model = resource_filename(__name__, 'data/frozen_east_text_detection.pb')
         self.east = east or pkg_east_model
         self._load_assets()
+
+    def get_image_text_and_coordinate(self,
+                                      image,
+                                      width=480,
+                                      height=480,
+                                      conf_threshold=0.2,
+                                      **kwargs):
+        loaded_image = image
+
+        image, width, height, ratio_width, ratio_height = self._resize_image(
+            loaded_image, width, height
+        )
+        scores, geometry = self._compute_scores_geometry(image, width, height)
+
+        # decoding results from the model
+        rectangles, confidences = box_extractor(scores, geometry, conf_threshold)
+
+        # find contours of all rectangles
+        mask = np.zeros((height, width), dtype=np.uint8)
+        for i in range(len(rectangles)):
+            x1, y1, x2, y2 = rectangles[i]
+            cv2.rectangle(mask, (x1, y1), (x2, y2), 255, -1)
+
+        contours, hierarchy = cv2.findContours(mask, cv2.RETR_LIST, cv2.CHAIN_APPROX_SIMPLE)
+        results = []
+        for i in range(len(contours) - 1, -1, -1):
+            x, y, w, h = cv2.boundingRect(contours[i])
+            start_x = int(x * ratio_width)
+            start_y = int(y * ratio_height)
+            end_x = int((x + w) * ratio_width)
+            end_y = int((y + h) * ratio_height)
+            # ROI to be recognized
+            roi = loaded_image[start_y:end_y, start_x:end_x]
+
+            # recognizing text
+            config = '-l jpn --oem 1 --psm 7'
+            text = str(pytesseract.image_to_string(roi, config=config))
+
+            ct = Contour(text=text, x=start_x, y=start_y, width=end_x - start_x, height=end_y - start_y)
+            results.append(ct)
+
+        return results
 
     def get_image_text(self,
                        image,
@@ -59,8 +104,7 @@ class EastTextExtractor:
         # decoding results from the model
         rectangles, confidences = box_extractor(scores, geometry, confThreshold)
 
-        # find countur of all rectangles
-
+        # find contours of all rectangles
         mask = np.zeros((height, width), dtype=np.uint8)
         for i in range(len(rectangles)):
             x1, y1, x2, y2 = rectangles[i]
@@ -90,10 +134,12 @@ class EastTextExtractor:
 
         return results
 
-    def _load_image(self, image):
+    @staticmethod
+    def _load_image(image):
         return cv2.imread(image)
 
-    def _resize_image(self, image, width, height):
+    @staticmethod
+    def _resize_image(image, width, height):
         (H, W) = image.shape[:2]
 
         (newW, newH) = (width, height)
@@ -102,8 +148,8 @@ class EastTextExtractor:
 
         # resize the image and grab the new image dimensions
         resized_image = cv2.resize(image, (newW, newH))
-        (H, W) = resized_image.shape[:2]
-        return (resized_image, height, width, ratio_width, ratio_height)
+        # (H, W) = resized_image.shape[:2]
+        return resized_image, height, width, ratio_width, ratio_height
 
     def _compute_scores_geometry(self, image, width, height):
         # construct a blob from the image and then perform a forward pass of
@@ -118,7 +164,7 @@ class EastTextExtractor:
 
         # show timing information on text prediction
         print('[INFO] text detection took {:.6f} seconds'.format(end - start))
-        return (scores, geometry)
+        return scores, geometry
 
     def _load_assets(self):
         self._get_east()

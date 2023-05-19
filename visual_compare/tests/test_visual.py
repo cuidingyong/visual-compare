@@ -23,19 +23,6 @@ class TestVisual:
     def get_path(self, filename):
         return self.image_base + filename
 
-    def test_check_exist(self):
-        img1 = self.get_path('123.png')
-        img11 = self.get_path('000.png')
-        self.cls().check_exist([img1, img11])
-
-    def test_check_exist_fail(self):
-        img1 = self.get_path('123.png')
-        img11 = self.get_path('00000.png')
-        try:
-            self.cls().check_exist([img1, img11])
-        except AssertionError as e:
-            print(e)
-
     def test_generate_mask(self):
         reference_image = self.get_path('123.png')
         mask_images = self.get_path('000.png')
@@ -63,5 +50,31 @@ class TestVisual:
         cls = self.cls()
         mask = cls.generate_mask(img1, mask_images)
         is_diff, res = cls.compare_images(img1, img2, mask=mask)
+        print(res)
+        assert is_diff is True
+
+    def test_compare_images_with_mask1(self):
+        img1 = self.get_path('008.jpg')
+        mask_images = self.get_path('007.png')
+        img2 = self.get_path('009.jpg')
+        cls = self.cls()
+        mask = cls.generate_mask(img1, mask_images)
+        is_diff, res = cls.compare_images(img1, img2, mask=mask)
+        print(res)
+        assert is_diff is True
+
+    def test_compare_images_with_force_ocr(self):
+        img1 = self.get_path('y1.png')
+        img2 = self.get_path('y2.png')
+        cls = self.cls()
+        is_diff, res = cls.compare_images(img1, img2, force_ocr=True, lang=['ja', 'en'])
+        print(res)
+        assert is_diff is True
+
+    def test_compare_images_with_force_ocr_and_ch(self):
+        img1 = self.get_path('123.png')
+        img2 = self.get_path('124.png')
+        cls = self.cls()
+        is_diff, res = cls.compare_images(img1, img2, force_ocr=True, lang=['ch_sim', 'en'])
         print(res)
         assert is_diff is True

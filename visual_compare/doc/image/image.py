@@ -11,13 +11,13 @@
                     2023/5/6
 -------------------------------------------------
 """
+import os
 from typing import Union
 
 import cv2
 import numpy
-import os
 
-from visual_compare.doc.models import Mask
+from visual_compare.doc.models import Mask, Contour
 from visual_compare.utils.common import is_url
 from visual_compare.utils.downloader import download_file_from_url
 
@@ -43,6 +43,38 @@ class Image:
     @property
     def height(self):
         return self.image.shape[0]
+
+
+class OcrImage:
+
+    def __init__(self, text: str, x: int, y: int, width: int, height: int):
+        self.text = text
+        self.x = x
+        self.y = y
+        self.width = width
+        self.height = height
+        self._identical = False
+
+    @property
+    def identical(self):
+        return self._identical
+
+    def equal(self, other: Contour, strip: bool = True, space_remove: bool = True, coordinate_eq: bool = False):
+        self._identical = False
+        if strip:
+            self.text = self.text.strip()
+            other.text = other.text.strip()
+        if space_remove:
+            self.text = self.text.replace(' ', '')
+            other.text = other.text.replace(' ', '')
+        if coordinate_eq:
+            if self.x != other.x or self.y != other.y or self.width != other.width or self.height != other.height:
+                return False
+        if self.text == other.text:
+            self._identical = True
+            return True
+        else:
+            return False
 
 
 class MatchImg:
@@ -72,19 +104,6 @@ class MatchImg:
 
         return img
 
-    # def parse_mask(self, source: str, temp: str, threshold=None, match_method=cv2.TM_CCOEFF_NORMED,
-    #                mask_type='coordinates', page: Union[str, int] = 'all'):
-    #     source_img = Image(source)
-    #     temp_img = Image(temp)
-    # 
-    #     mask_list = []
-    #     match_list = self.match_temp(source_img.image, temp_img.image, threshold, match_method)
-    #     for m in match_list:
-    #         mask = Mask(type=mask_type, page=1, x=m[0], y=m[1], width=temp_img.width, height=temp_img.height)
-    #         mask_list.append(mask.dict())
-    # 
-    #     return mask_list
-
     def parse_mask(self, source: Union[str, list], temp: Union[str, list], threshold=None,
                    match_method=cv2.TM_CCOEFF_NORMED, mask_type='coordinates'):
         if isinstance(source, str):
@@ -92,7 +111,6 @@ class MatchImg:
         if isinstance(temp, str):
             temp = [temp]
         for i, s in enumerate(source):
-            # sii = Image(s)
             for t in temp:
                 ti = Image(t)
                 match_list = self.match_temp(s, ti.image, threshold, match_method)

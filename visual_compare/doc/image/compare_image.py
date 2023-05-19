@@ -21,15 +21,16 @@ import time
 from os.path import splitext, split
 
 import cv2
+import easyocr
 import fitz
 import numpy as np
 import pytesseract
 from pytesseract import Output
 
+from visual_compare.utils.common import is_url
 from visual_compare.utils.downloader import download_file_from_url
 from .ocr import EastTextExtractor
-from ..match import MatchPdf
-from visual_compare.utils.common import is_url
+from ..models import Contour
 
 logger = logging.getLogger(__name__)
 
@@ -53,6 +54,9 @@ class CompareImage(object):
         self.force_ocr = kwargs.pop('force_ocr', False)
         self.ocr_engine = kwargs.pop('ocr_engine', 'tesseract')
         self.DPI = int(kwargs.pop('DPI', 200))
+        self.lang = kwargs.pop('lang', 'en')
+        self.contrast_ths = kwargs.pop('contrast_ths', 0.4)
+        self.adjust_contrast = kwargs.pop('adjust_contrast', 0.6)
         if is_url(image):
             self.image = download_file_from_url(image)
         else:
@@ -63,6 +67,7 @@ class CompareImage(object):
         self.placeholders = []
         self.placeholder_mask = None
         self.text_content = []
+        self.ocr_text_contents = []
         # self.pdf_content = []
         self.placeholder_frame_width = 10
         self.tmp_directory = tempfile.TemporaryDirectory()
@@ -141,6 +146,29 @@ class CompareImage(object):
                 {'text': text_list, 'left': left_list, 'top': top_list, 'width': width_list, 'height': height_list,
                  'conf': conf_list})
 
+    def get_ocr_text_content(self):
+        # self.increase_resolution_for_ocr()
+        for i in range(len(self.opencv_images)):
+            ocr_text_content = []
+            cv_image = self.opencv_images[i]
+            gray_image = cv2.cvtColor(cv_image, cv2.COLOR_BGR2GRAY)
+            threshold_image = cv2.threshold(gray_image, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)[1]
+            reader = easyocr.Reader(self.lang)
+            text_list = reader.readtext(threshold_image, contrast_ths=self.contrast_ths,
+                                        adjust_contrast=self.adjust_contrast)
+            # eo = EasyOcr(self.lang)
+            # text_list = eo.get_image_text_and_coordinate(threshold_image)
+            for text in text_list:
+                na = np.array(text[0]).astype(np.int32)
+                x, y, w, h = cv2.boundingRect(na)
+                # try:
+                #     x, y, w, h = cv2.boundingRect(na)
+                # except Exception as e:
+                #     print(e)
+                ct = Contour(text=text[1], x=x, y=y, width=w, height=h)
+                ocr_text_content.append(ct)
+            self.ocr_text_contents.append(ocr_text_content)
+
     def increase_resolution_for_ocr(self):
         # experimental: IF OCR is used and DPI is lower than self.MINIMUM_OCR_RESOLUTION DPI, re-render with self.MINIMUM_OCR_RESOLUTION DPI
         if self.DPI < self.MINIMUM_OCR_RESOLUTION:
@@ -176,22 +204,15 @@ class CompareImage(object):
     def identify_placeholders(self):
         placeholders = None
         if self.placeholder_file is not None:
-            if isinstance(self.placeholder_file, list):
-                placeholders = []
-                for pf in self.placeholder_file:
-                    if self.is_image(pf):
-                        mi = MatchPdf(self.opencv_images[0], pf)
-                        placeholders.extend(mi.mask)
-            elif isinstance(self.placeholders, str):
-                try:
-                    with open(self.placeholder_file, 'r') as f:
-                        placeholders = json.load(f)
-                except IOError as err:
-                    logger.error("Placeholder File %s is not accessible", self.placeholder_file)
-                    logger.error("I/O error: {0}".format(err))
-                except:
-                    logger.error("Unexpected error:", sys.exc_info()[0])
-                    raise
+            try:
+                with open(self.placeholder_file, 'r') as f:
+                    placeholders = json.load(f)
+            except IOError as err:
+                logger.error("Placeholder File %s is not accessible", self.placeholder_file)
+                logger.error("I/O error: {0}".format(err))
+            except:
+                logger.error("Unexpected error:", sys.exc_info()[0])
+                raise
         elif self.mask is not None:
             if isinstance(self.mask, dict):
                 placeholders = self.mask
@@ -516,6 +537,8 @@ class CompareImage(object):
             self.identify_placeholders()
         if self.contains_barcodes is True:
             self.identify_barcodes()
+        if self.force_ocr:
+            self.get_ocr_text_content()
         if self.placeholders:
             print('Identified Masks: {}'.format(self.placeholders))
 
