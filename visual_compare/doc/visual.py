@@ -51,7 +51,7 @@ class Visual(object):
     CANDIDATE_LABEL = "Actual Result (Candidate)"
     OCR_ENGINE = "tesseract"
     MOVEMENT_DETECTION = "classic"
-    LANG_DEFAULT = 'en'
+    LANG_DEFAULT = ['en']
     CONTRAST_THS_DEFAULT = 0.4
     ADJUST_CONTRAST_DEFAULT = 0.6
 
@@ -276,8 +276,8 @@ class Visual(object):
                     except IndexError:
                         reference_text_content = reference_compare_image.ocr_text_contents[0]
                         candidate_text_content = candidate_compare_image.ocr_text_contents[0]
-                    # print('reference -> ', reference_text_content)
-                    # print('candidate -> ', candidate_text_content)
+                    print('reference -> ', reference_text_content)
+                    print('candidate -> ', candidate_text_content)
                     check_difference_results.append(parallel_executor.submit(
                         self.check_for_ocr_differences, reference, candidate, i, detected_differences,
                         screenshot_names, compare_options, reference_text_content, candidate_text_content))
